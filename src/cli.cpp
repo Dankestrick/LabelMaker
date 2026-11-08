@@ -20,7 +20,8 @@ void printHelp(QTextStream &out)
 {
     out << "label-maker open [file]\n"
            "label-maker --render <file> --size 4x6 [--page N] [--fit shipping|page|fill]\n"
-           "            [--photo] [--darkness N] [--copies N] --out preview.png [--tspl job.bin] [--print] [--json]\n";
+           "            [--turn auto|upright|sideways] [--photo] [--darkness N] [--copies N]\n"
+           "            --out preview.png [--tspl job.bin] [--print] [--json]\n";
 }
 
 bool writeAtomic(const QString &path, const QByteArray &bytes, QString *error)
@@ -71,6 +72,7 @@ int runCli()
     QString outPath;
     QString tsplPath;
     QString fitText = QStringLiteral("shipping");
+    QString turnText = QStringLiteral("auto");
     int page = 1;
     int darkness = 10;
     int copies = 1;
@@ -110,6 +112,11 @@ int runCli()
         } else if (arg == QLatin1String("--fit")) {
             if (!need(&fitText)) {
                 fail(QCoreApplication::translate("Cli", "Missing the fit after --fit."), json);
+                return 1;
+            }
+        } else if (arg == QLatin1String("--turn")) {
+            if (!need(&turnText)) {
+                fail(QCoreApplication::translate("Cli", "Missing the turn after --turn."), json);
                 return 1;
             }
         } else if (arg == QLatin1String("--out")) {
@@ -186,6 +193,16 @@ int runCli()
         fail(QCoreApplication::translate("Cli", "Fit has to be shipping, page, or fill."), json);
         return 1;
     }
+    if (turnText == QLatin1String("auto"))
+        request.turn = LabelRenderer::Turn::Auto;
+    else if (turnText == QLatin1String("upright"))
+        request.turn = LabelRenderer::Turn::Upright;
+    else if (turnText == QLatin1String("sideways"))
+        request.turn = LabelRenderer::Turn::Sideways;
+    else {
+        fail(QCoreApplication::translate("Cli", "Turn has to be auto, upright, or sideways."), json);
+        return 1;
+    }
 
     const LabelRenderer::Result result = LabelRenderer::renderFile(input, request);
     if (!result.ok()) {
@@ -244,6 +261,7 @@ int runCli()
         object.insert(QStringLiteral("height"), result.image.height());
         object.insert(QStringLiteral("pages"), result.pageCount);
         object.insert(QStringLiteral("rotated"), result.rotated);
+        object.insert(QStringLiteral("blank"), result.blank);
         QTextStream(stdout) << QJsonDocument(object).toJson(QJsonDocument::Compact) << "\n";
     }
     return 0;

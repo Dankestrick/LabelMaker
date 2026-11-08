@@ -55,6 +55,7 @@ LabelRenderer::Request Backend::request() const
     request.heightMm = m_heightMm;
     request.pageIndex = m_page - 1;
     request.fit = static_cast<LabelRenderer::Fit>(qBound(0, m_fit, 2));
+    request.turn = static_cast<LabelRenderer::Turn>(qBound(0, m_turn, 2));
     request.photo = m_photo;
     return request;
 }
@@ -80,6 +81,7 @@ Backend::Snapshot Backend::capture() const
     snapshot.darkness = m_darkness;
     snapshot.copies = m_copies;
     snapshot.fit = m_fit;
+    snapshot.turn = m_turn;
     snapshot.sizeIndex = m_sizeIndex;
     snapshot.photo = m_photo;
     snapshot.fitChosen = m_fitChosen;
@@ -110,6 +112,7 @@ void Backend::restore(const Snapshot &snapshot)
     m_darkness = snapshot.darkness;
     m_copies = snapshot.copies;
     m_fit = snapshot.fit;
+    m_turn = snapshot.turn;
     m_sizeIndex = snapshot.sizeIndex;
     m_photo = snapshot.photo;
     m_fitChosen = snapshot.fitChosen;
@@ -120,6 +123,7 @@ void Backend::restore(const Snapshot &snapshot)
     if (m_path.isEmpty()) {
         m_preview = {};
         m_pageCount = 0;
+        m_blank = false;
         m_error.clear();
         m_status.clear();
         ++m_revision;
@@ -146,6 +150,7 @@ void Backend::openPath(const QString &path)
         const bool pdf = path.endsWith(QLatin1String(".pdf"), Qt::CaseInsensitive);
         m_fit = pdf ? 0 : 1;
     }
+    m_turn = 0;
     m_status = tr("Reading the file...");
     emit changed();
     scheduleRender();
@@ -242,6 +247,16 @@ void Backend::setFit(int fit)
     scheduleRender();
 }
 
+void Backend::setTurn(int turn)
+{
+    turn = qBound(0, turn, 2);
+    if (turn == m_turn)
+        return;
+    pushUndo();
+    m_turn = turn;
+    scheduleRender();
+}
+
 void Backend::setSizeIndex(int index)
 {
     index = qBound(0, index, kCustomSizeIndex);
@@ -298,10 +313,12 @@ void Backend::renderNow()
     m_pageCount = result.pageCount;
     if (!result.ok()) {
         m_preview = {};
+        m_blank = false;
         m_error = result.error;
         m_status.clear();
     } else {
         m_preview = result.image;
+        m_blank = result.blank;
         m_error.clear();
         m_status.clear();
         if (m_page > qMax(1, m_pageCount))

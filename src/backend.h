@@ -23,6 +23,8 @@ class Backend : public QObject {
     Q_PROPERTY(int copies READ copies WRITE setCopies NOTIFY changed)
     Q_PROPERTY(bool photo READ photo WRITE setPhoto NOTIFY changed)
     Q_PROPERTY(int fit READ fit WRITE setFit NOTIFY changed)
+    Q_PROPERTY(int turn READ turn WRITE setTurn NOTIFY changed)
+    Q_PROPERTY(bool blank READ blank NOTIFY changed)
     Q_PROPERTY(int sizeIndex READ sizeIndex WRITE setSizeIndex NOTIFY changed)
     Q_PROPERTY(double customWidthMm READ customWidthMm WRITE setCustomWidthMm NOTIFY changed)
     Q_PROPERTY(double customHeightMm READ customHeightMm WRITE setCustomHeightMm NOTIFY changed)
@@ -46,6 +48,8 @@ public:
     int copies() const { return m_copies; }
     bool photo() const { return m_photo; }
     int fit() const { return m_fit; }
+    int turn() const { return m_turn; }
+    bool blank() const { return m_blank; }
     int sizeIndex() const { return m_sizeIndex; }
     double customWidthMm() const { return m_customWidthMm; }
     double customHeightMm() const { return m_customHeightMm; }
@@ -65,6 +69,7 @@ public:
     void setCopies(int copies);
     void setPhoto(bool photo);
     void setFit(int fit);
+    void setTurn(int turn);
     void setSizeIndex(int index);
     void setCustomWidthMm(double mm);
     void setCustomHeightMm(double mm);
@@ -85,6 +90,7 @@ private:
         int darkness = 10;
         int copies = 1;
         int fit = 0;
+        int turn = 0;
         int sizeIndex = 0;
         bool photo = false;
         bool fitChosen = false;
@@ -93,8 +99,8 @@ private:
         bool operator==(const Snapshot &other) const
         {
             return path == other.path && page == other.page && darkness == other.darkness
-                && copies == other.copies && fit == other.fit && sizeIndex == other.sizeIndex
-                && photo == other.photo && fitChosen == other.fitChosen
+                && copies == other.copies && fit == other.fit && turn == other.turn
+                && sizeIndex == other.sizeIndex && photo == other.photo && fitChosen == other.fitChosen
                 && customWidthMm == other.customWidthMm && customHeightMm == other.customHeightMm;
         }
     };
@@ -117,6 +123,8 @@ private:
     int m_copies = 1;
     bool m_photo = false;
     int m_fit = 0;
+    int m_turn = 0;
+    bool m_blank = false;
     int m_sizeIndex = 0;
     bool m_fitChosen = false;
     double m_customWidthMm = 50;

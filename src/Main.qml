@@ -90,6 +90,15 @@ ApplicationWindow {
                 Layout.fillHeight: true
             }
 
+            Label {
+                visible: backend.blank
+                text: qsTr("Nothing dark to print on this label.")
+                color: "#9a9aa0"
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
             LabelControls {
                 Layout.fillWidth: true
             }

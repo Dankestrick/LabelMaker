@@ -398,11 +398,72 @@ QImage toGray(const QImage &source, int width, int height, bool photo)
 
 QImage flatten(const QImage &source)
 {
+    // Clear pixels are stored as black with alpha 0. Composite them onto
+    // white before any grayscale test, or the padding prints as ink.
     QImage base(source.size(), QImage::Format_RGB32);
     base.fill(Qt::white);
-    QPainter painter(&base);
-    painter.drawImage(0, 0, source);
+    {
+        QPainter painter(&base);
+        painter.drawImage(0, 0, source);
+    }
     return base;
+}
+
+bool usesTransparency(const QImage &image)
+{
+    if (!image.hasAlphaChannel())
+        return false;
+    const QImage argb = image.format() == QImage::Format_ARGB32
+                            ? image
+                            : image.convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < argb.height(); ++y) {
+        const auto *row = reinterpret_cast<const QRgb *>(argb.constScanLine(y));
+        for (int x = 0; x < argb.width(); ++x) {
+            if (qAlpha(row[x]) < 16)
+                return true;
+        }
+    }
+    return false;
+}
+
+// Shipping always frames the ink. Fill does too, so the cover-crop stays on
+// the artwork instead of the middle of a loose canvas. Fit keeps an opaque
+// picture whole, and treats a clear background as padding.
+QRect artworkRect(const QImage &flat, const QImage &raw, LabelRenderer::Fit fit)
+{
+    const QRect full(0, 0, flat.width(), flat.height());
+    const QRect ink = contentBounds(flat, 250);
+    if (fit == LabelRenderer::Fit::Shipping)
+        return ink;
+    if (!ink.isEmpty() && (fit == LabelRenderer::Fit::Fill || usesTransparency(raw)))
+        return ink;
+    return full;
+}
+
+bool wantsRotate(LabelRenderer::Turn turn, double srcW, double srcH, double dstW, double dstH)
+{
+    if (turn == LabelRenderer::Turn::Sideways)
+        return true;
+    if (turn == LabelRenderer::Turn::Upright)
+        return false;
+    return shouldRotate(srcW, srcH, dstW, dstH);
+}
+
+// Less than one dot in a thousand is ink. A real mark is well above this.
+bool almostNoInk(const QImage &image)
+{
+    const int total = image.width() * image.height();
+    if (total <= 0)
+        return true;
+    int black = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        const uchar *row = image.constScanLine(y);
+        for (int x = 0; x < image.width(); ++x) {
+            if (row[x >> 3] & static_cast<uchar>(0x80 >> (x & 7)))
+                ++black;
+        }
+    }
+    return black * 1000 < total;
 }
 
 bool looksLikePdf(const QString &path)
@@ -501,10 +562,7 @@ LabelRenderer::Result renderPdf(const QString &path, const LabelRenderer::Reques
     const int slotH = fill ? labelH : std::max(8, labelH - 2 * margin);
     const double srcW = sourcePt.width() / 72.0 * 203.0;
     const double srcH = sourcePt.height() / 72.0 * 203.0;
-    // Only shipping turns the artwork. Fit whole page keeps the page's
-    // orientation and letterboxes. Fill crops that same orientation.
-    const bool rotated = request.fit == LabelRenderer::Fit::Shipping
-                         && shouldRotate(srcW, srcH, slotW, slotH);
+    const bool rotated = wantsRotate(request.turn, srcW, srcH, slotW, slotH);
     const double placedW = rotated ? srcH : srcW;
     const double placedH = rotated ? srcW : srcH;
     const double scale = fill ? std::max(slotW / placedW, slotH / placedH)
@@ -535,6 +593,7 @@ LabelRenderer::Result renderPdf(const QString &path, const LabelRenderer::Reques
     result.rotated = rotated;
     result.image = monoCanvas(labelW, labelH);
     paintGray(result.image, gray, originX, originY, request.photo, request.threshold);
+    result.blank = almostNoInk(result.image);
     return result;
 }
 
@@ -548,20 +607,16 @@ LabelRenderer::Result renderPicture(const QString &path, const LabelRenderer::Re
         return fail(tr("That isn't a PDF or a picture this app can open."));
 
     const QImage flat = flatten(raw);
-    QRect region(0, 0, flat.width(), flat.height());
-    if (request.fit == LabelRenderer::Fit::Shipping) {
-        region = contentBounds(flat, 250);
-        if (region.isEmpty())
-            return fail(tr("This page looks blank."));
-    }
+    const QRect region = artworkRect(flat, raw, request.fit);
+    if (request.fit == LabelRenderer::Fit::Shipping && region.isEmpty())
+        return fail(tr("This page looks blank."));
 
     const bool fill = request.fit == LabelRenderer::Fit::Fill;
     const int slotW = fill ? labelW : std::max(8, labelW - 2 * margin);
     const int slotH = fill ? labelH : std::max(8, labelH - 2 * margin);
     const double srcW = region.width();
     const double srcH = region.height();
-    const bool rotated = request.fit == LabelRenderer::Fit::Shipping
-                         && shouldRotate(srcW, srcH, slotW, slotH);
+    const bool rotated = wantsRotate(request.turn, srcW, srcH, slotW, slotH);
     const double placedW = rotated ? srcH : srcW;
     const double placedH = rotated ? srcW : srcH;
     double scale = fill ? std::max(slotW / placedW, slotH / placedH)
@@ -586,6 +641,7 @@ LabelRenderer::Result renderPicture(const QString &path, const LabelRenderer::Re
     result.rotated = rotated;
     result.image = monoCanvas(labelW, labelH);
     paintGray(result.image, gray, originX, originY, request.photo, request.threshold);
+    result.blank = almostNoInk(result.image);
     return result;
 }
 
