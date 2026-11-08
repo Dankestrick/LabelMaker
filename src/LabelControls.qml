@@ -58,21 +58,6 @@ ColumnLayout {
         Item { width: 1; height: 1 }
 
         Label {
-            text: qsTr("Turn")
-            color: "#c8c8cc"
-        }
-
-        ComboBox {
-            Layout.fillWidth: true
-            Material.roundedScale: theme.radius
-            model: [qsTr("Auto"), qsTr("Upright"), qsTr("Sideways")]
-            currentIndex: backend.turn
-            onActivated: (index) => backend.turn = index
-        }
-
-        Item { width: 1; height: 1 }
-
-        Label {
             text: qsTr("Darkness")
             color: "#c8c8cc"
         }

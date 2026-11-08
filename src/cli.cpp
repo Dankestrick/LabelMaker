@@ -20,7 +20,7 @@ void printHelp(QTextStream &out)
 {
     out << "label-maker open [file]\n"
            "label-maker --render <file> --size 4x6 [--page N] [--fit shipping|page|fill]\n"
-           "            [--turn auto|upright|sideways] [--photo] [--darkness N] [--copies N]\n"
+           "            [--turn auto|upright|sideways|0|90|180|270] [--photo] [--darkness N] [--copies N]\n"
            "            --out preview.png [--tspl job.bin] [--print] [--json]\n";
 }
 
@@ -199,8 +199,11 @@ int runCli()
         request.turn = LabelRenderer::Turn::Upright;
     else if (turnText == QLatin1String("sideways"))
         request.turn = LabelRenderer::Turn::Sideways;
+    else if (turnText == QLatin1String("0") || turnText == QLatin1String("90")
+             || turnText == QLatin1String("180") || turnText == QLatin1String("270"))
+        request.absoluteDegrees = turnText.toInt();
     else {
-        fail(QCoreApplication::translate("Cli", "Turn has to be auto, upright, or sideways."), json);
+        fail(QCoreApplication::translate("Cli", "Turn has to be auto, upright, sideways, 0, 90, 180, or 270."), json);
         return 1;
     }
 
@@ -261,6 +264,7 @@ int runCli()
         object.insert(QStringLiteral("height"), result.image.height());
         object.insert(QStringLiteral("pages"), result.pageCount);
         object.insert(QStringLiteral("rotated"), result.rotated);
+        object.insert(QStringLiteral("turn"), result.turnDegrees);
         object.insert(QStringLiteral("blank"), result.blank);
         QTextStream(stdout) << QJsonDocument(object).toJson(QJsonDocument::Compact) << "\n";
     }

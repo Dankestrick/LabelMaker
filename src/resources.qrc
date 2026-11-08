@@ -4,6 +4,7 @@
         <file alias="LabelPreview.qml">LabelPreview.qml</file>
         <file alias="LabelControls.qml">LabelControls.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+        <file alias="rotate.svg">rotate.svg</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/da.json">i18n/da.json</file>
     </qresource>

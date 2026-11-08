@@ -440,13 +440,55 @@ QRect artworkRect(const QImage &flat, const QImage &raw, LabelRenderer::Fit fit)
     return full;
 }
 
-bool wantsRotate(LabelRenderer::Turn turn, double srcW, double srcH, double dstW, double dstH)
+int resolveDegrees(const LabelRenderer::Request &request, double srcW, double srcH, double dstW, double dstH)
 {
-    if (turn == LabelRenderer::Turn::Sideways)
-        return true;
-    if (turn == LabelRenderer::Turn::Upright)
-        return false;
-    return shouldRotate(srcW, srcH, dstW, dstH);
+    const int absolute = request.absoluteDegrees;
+    if (absolute == 0 || absolute == 90 || absolute == 180 || absolute == 270)
+        return absolute;
+    if (request.turn == LabelRenderer::Turn::Upright)
+        return 0;
+    if (request.turn == LabelRenderer::Turn::Sideways)
+        return 90;
+    const int base = shouldRotate(srcW, srcH, dstW, dstH) ? 90 : 0;
+    int extra = request.extraQuarters % 4;
+    if (extra < 0)
+        extra += 4;
+    return (base + extra * 90) % 360;
+}
+
+// 90 and 270 fit the unrotated artwork into the label turned on its side
+// (1218×808 for a 4×6), then that whole box is rotated onto the label.
+struct TurnFit {
+    int degrees = 0;
+    bool sideways = false;
+    int outW = 1;
+    int outH = 1;
+};
+
+TurnFit fitTurn(const LabelRenderer::Request &request, double srcW, double srcH,
+                int labelW, int labelH, int slotW, int slotH, bool capScale)
+{
+    TurnFit fit;
+    fit.degrees = resolveDegrees(request, srcW, srcH, slotW, slotH);
+    fit.sideways = fit.degrees == 90 || fit.degrees == 270;
+    const double placedW = fit.sideways ? srcH : srcW;
+    const double placedH = fit.sideways ? srcW : srcH;
+    const bool exact = !fit.sideways && std::lround(srcW) == labelW && std::lround(srcH) == labelH;
+    const bool fill = request.fit == LabelRenderer::Fit::Fill;
+    // Sideways uses the full turned label so the artwork is as large as it
+    // can be. An image that is already the label stays pixel for pixel.
+    const double targetW = (fill || fit.sideways || exact) ? labelW : slotW;
+    const double targetH = (fill || fit.sideways || exact) ? labelH : slotH;
+    double scale = 1.0;
+    if (!exact) {
+        scale = fill ? std::max(targetW / placedW, targetH / placedH)
+                     : std::min(targetW / placedW, targetH / placedH);
+        if (capScale && scale > request.maxImageScale)
+            scale = request.maxImageScale;
+    }
+    fit.outW = exact ? labelW : std::max(1, int(std::lround(placedW * scale)));
+    fit.outH = exact ? labelH : std::max(1, int(std::lround(placedH * scale)));
+    return fit;
 }
 
 // Less than one dot in a thousand is ink. A real mark is well above this.
@@ -562,27 +604,19 @@ LabelRenderer::Result renderPdf(const QString &path, const LabelRenderer::Reques
     const int slotH = fill ? labelH : std::max(8, labelH - 2 * margin);
     const double srcW = sourcePt.width() / 72.0 * 203.0;
     const double srcH = sourcePt.height() / 72.0 * 203.0;
-    const bool rotated = wantsRotate(request.turn, srcW, srcH, slotW, slotH);
-    const double placedW = rotated ? srcH : srcW;
-    const double placedH = rotated ? srcW : srcH;
-    const double scale = fill ? std::max(slotW / placedW, slotH / placedH)
-                              : std::min(slotW / placedW, slotH / placedH);
-    const int outW = std::max(1, int(std::lround(placedW * scale)));
-    const int outH = std::max(1, int(std::lround(placedH * scale)));
+    const TurnFit fit = fitTurn(request, srcW, srcH, labelW, labelH, slotW, slotH, false);
 
     // Ask Poppler for the dots we will actually print. The cap stops a tiny
     // speck from requesting a huge render; pixels are not stretched past it.
-    const double placedInches = std::max(0.01, (rotated ? sourcePt.height() : sourcePt.width()) / 72.0);
-    const double dpi = std::min(2400.0, outW / placedInches);
+    const double placedInches = std::max(0.01, (fit.sideways ? sourcePt.height() : sourcePt.width()) / 72.0);
+    const double dpi = std::min(2400.0, fit.outW / placedInches);
     QImage drawn = renderPdfRegion(page.get(), sourcePt, dpi);
     if (drawn.isNull())
         return fail(tr("Couldn't draw that page."), pageCount);
-    if (rotated)
-        drawn = drawn.transformed(QTransform().rotate(90), Qt::FastTransformation);
+    if (fit.degrees != 0)
+        drawn = drawn.transformed(QTransform().rotate(fit.degrees), Qt::FastTransformation);
 
-    const int targetW = fill ? outW : std::min(outW, slotW);
-    const int targetH = fill ? outH : std::min(outH, slotH);
-    QImage gray = toGray(drawn, targetW, targetH, request.photo);
+    QImage gray = toGray(drawn, fit.outW, fit.outH, request.photo);
 
     int originX = 0;
     int originY = 0;
@@ -590,7 +624,8 @@ LabelRenderer::Result renderPdf(const QString &path, const LabelRenderer::Reques
 
     LabelRenderer::Result result;
     result.pageCount = pageCount;
-    result.rotated = rotated;
+    result.rotated = fit.sideways;
+    result.turnDegrees = fit.degrees;
     result.image = monoCanvas(labelW, labelH);
     paintGray(result.image, gray, originX, originY, request.photo, request.threshold);
     result.blank = almostNoInk(result.image);
@@ -616,21 +651,11 @@ LabelRenderer::Result renderPicture(const QString &path, const LabelRenderer::Re
     const int slotH = fill ? labelH : std::max(8, labelH - 2 * margin);
     const double srcW = region.width();
     const double srcH = region.height();
-    const bool rotated = wantsRotate(request.turn, srcW, srcH, slotW, slotH);
-    const double placedW = rotated ? srcH : srcW;
-    const double placedH = rotated ? srcW : srcH;
-    double scale = fill ? std::max(slotW / placedW, slotH / placedH)
-                        : std::min(slotW / placedW, slotH / placedH);
-    // A picture has a fixed pixel grid. Past 2x it just gets soft, so stop.
-    if (scale > request.maxImageScale)
-        scale = request.maxImageScale;
-
-    const int outW = std::max(1, int(std::lround(placedW * scale)));
-    const int outH = std::max(1, int(std::lround(placedH * scale)));
+    const TurnFit fit = fitTurn(request, srcW, srcH, labelW, labelH, slotW, slotH, true);
     QImage crop = flat.copy(region);
-    if (rotated)
-        crop = crop.transformed(QTransform().rotate(90), Qt::FastTransformation);
-    QImage gray = toGray(crop, outW, outH, request.photo);
+    if (fit.degrees != 0)
+        crop = crop.transformed(QTransform().rotate(fit.degrees), Qt::FastTransformation);
+    QImage gray = toGray(crop, fit.outW, fit.outH, request.photo);
 
     int originX = 0;
     int originY = 0;
@@ -638,7 +663,8 @@ LabelRenderer::Result renderPicture(const QString &path, const LabelRenderer::Re
 
     LabelRenderer::Result result;
     result.pageCount = 1;
-    result.rotated = rotated;
+    result.rotated = fit.sideways;
+    result.turnDegrees = fit.degrees;
     result.image = monoCanvas(labelW, labelH);
     paintGray(result.image, gray, originX, originY, request.photo, request.threshold);
     result.blank = almostNoInk(result.image);

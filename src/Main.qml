@@ -78,6 +78,32 @@ ApplicationWindow {
                 }
 
                 Button {
+                    visible: backend.turn !== 0
+                    text: qsTr("Auto")
+                    flat: true
+                    font.pixelSize: 14
+                    Material.roundedScale: theme.radius
+                    onClicked: {
+                        labelPreview.cancelSpin()
+                        backend.resetTurn()
+                    }
+                }
+
+                Button {
+                    text: qsTr("Rotate")
+                    icon.source: "qrc:/rotate.svg"
+                    icon.width: 20
+                    icon.height: 20
+                    display: AbstractButton.TextBesideIcon
+                    enabled: backend.hasLabel && !backend.printing
+                    Material.roundedScale: theme.radius
+                    onClicked: {
+                        labelPreview.spinQuarter()
+                        backend.rotate()
+                    }
+                }
+
+                Button {
                     text: backend.printing ? qsTr("Printing...") : qsTr("Print")
                     enabled: backend.canPrint
                     onClicked: backend.print()
@@ -86,6 +112,7 @@ ApplicationWindow {
             }
 
             LabelPreview {
+                id: labelPreview
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }

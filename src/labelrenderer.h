@@ -17,6 +17,10 @@ public:
         int pageIndex = 0;
         Fit fit = Fit::Shipping;
         Turn turn = Turn::Auto;
+        // 0, 90, 180, or 270 wins over turn. -1 keeps Auto / Upright / Sideways.
+        int absoluteDegrees = -1;
+        // Clockwise quarter turns added on top of Auto.
+        int extraQuarters = 0;
         bool photo = false;
         int threshold = 160;
         double marginMm = 2.0;
@@ -28,7 +32,10 @@ public:
     struct Result {
         QImage image;
         int pageCount = 0;
+        // On its side (90 or 270). 180 is upside down at the upright size.
         bool rotated = false;
+        // Clockwise degrees actually applied: 0, 90, 180, or 270.
+        int turnDegrees = 0;
         // The 1-bit label is white, or only a speck of ink. White art on a
         // clear background lands here.
         bool blank = false;

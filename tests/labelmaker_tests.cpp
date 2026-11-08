@@ -59,6 +59,47 @@ Coverage cover(const QImage &image)
     return result;
 }
 
+struct Dot {
+    int count = 0;
+    double x = 0;
+    double y = 0;
+};
+
+Dot whiteDot(const QImage &image, const QRect &bounds)
+{
+    Dot dot;
+    long long sx = 0;
+    long long sy = 0;
+    const QRect area = bounds.intersected(QRect(0, 0, image.width(), image.height()));
+    for (int y = area.top(); y <= area.bottom(); ++y) {
+        for (int x = area.left(); x <= area.right(); ++x) {
+            if (image.pixel(x, y) != qRgb(255, 255, 255))
+                continue;
+            ++dot.count;
+            sx += x;
+            sy += y;
+        }
+    }
+    if (dot.count > 0) {
+        dot.x = double(sx) / dot.count;
+        dot.y = double(sy) / dot.count;
+    }
+    return dot;
+}
+
+bool samePixels(const QImage &a, const QImage &b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (int y = 0; y < a.height(); ++y) {
+        for (int x = 0; x < a.width(); ++x) {
+            if (a.pixel(x, y) != b.pixel(x, y))
+                return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 class LabelMakerTests : public QObject {
@@ -83,6 +124,9 @@ private slots:
     void transparentPrintsWhite();
     void whiteArtRaisesTheBlankHint();
     void turnUndoesAndResetsOnANewFile();
+    void quarterTurnsOfAWideImage();
+    void portraitLabelAtZeroStaysPut();
+    void rotateFourTimesReturnsToAuto();
     void encoderHeaderAndByteCount();
     void polaritySwitchInvertsBytes();
     void themeFallsBack();
@@ -554,6 +598,180 @@ void LabelMakerTests::turnUndoesAndResetsOnANewFile()
     QCOMPARE(backend.turn(), 2);
     QCOMPARE(backend.fileName(), QStringLiteral("black.png"));
     QTRY_VERIFY_WITH_TIMEOUT(!backend.blank(), 5000);
+}
+
+void LabelMakerTests::quarterTurnsOfAWideImage()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QImage source(960, 240, QImage::Format_RGB32);
+    source.fill(Qt::black);
+    for (int y = 20; y < 68; ++y) {
+        for (int x = 20; x < 68; ++x)
+            source.setPixel(x, y, qRgb(255, 255, 255));
+    }
+    const QString path = dir.filePath(QStringLiteral("wide.png"));
+    QVERIFY(source.save(path));
+
+    const LabelRenderer::Fit fits[] = {LabelRenderer::Fit::Shipping, LabelRenderer::Fit::Page,
+                                       LabelRenderer::Fit::Fill};
+    const int degrees[] = {0, 90, 180, 270};
+    for (LabelRenderer::Fit fit : fits) {
+        QSize uprightBox;
+        QSize sidewaysBox;
+        for (int deg : degrees) {
+            LabelRenderer::Request request;
+            request.fit = fit;
+            request.absoluteDegrees = deg;
+            const LabelRenderer::Result result = LabelRenderer::renderFile(path, request);
+            QVERIFY2(result.ok(), qPrintable(result.error));
+            QCOMPARE(result.image.size(), QSize(808, 1218));
+            QCOMPARE(result.turnDegrees, deg);
+            QCOMPARE(result.rotated, deg == 90 || deg == 270);
+
+            const Coverage pixels = cover(result.image);
+            QCOMPARE(pixels.other, 0);
+            QVERIFY(pixels.black > 1000);
+            const int left = pixels.box.left();
+            const int right = result.image.width() - pixels.box.right() - 1;
+            const int top = pixels.box.top();
+            const int bottom = result.image.height() - pixels.box.bottom() - 1;
+            QVERIFY2(std::abs(left - right) <= 2, qPrintable(QString("%1 vs %2").arg(left).arg(right)));
+            QVERIFY2(std::abs(top - bottom) <= 2, qPrintable(QString("%1 vs %2").arg(top).arg(bottom)));
+
+            const bool contain = fit != LabelRenderer::Fit::Fill;
+            if (contain && (deg == 90 || deg == 270))
+                QVERIFY2(pixels.box.height() >= 1216, qPrintable(QString::number(pixels.box.height())));
+            if (contain && (deg == 0 || deg == 180))
+                QVERIFY2(pixels.box.height() < 400, qPrintable(QString::number(pixels.box.height())));
+
+            if (deg == 0)
+                uprightBox = pixels.box.size();
+            if (deg == 180)
+                QCOMPARE(pixels.box.size(), uprightBox);
+            if (deg == 90)
+                sidewaysBox = pixels.box.size();
+            if (deg == 270)
+                QCOMPARE(pixels.box.size(), sidewaysBox);
+
+            if (!contain)
+                continue;
+
+            const QImage turned = source.transformed(QTransform().rotate(deg), Qt::FastTransformation);
+            const Dot from = whiteDot(turned, turned.rect());
+            const Dot hole = whiteDot(result.image, pixels.box.adjusted(1, 1, -1, -1));
+            QVERIFY2(from.count > 10, qPrintable(QString::number(deg)));
+            QVERIFY2(hole.count > 10, qPrintable(QString::number(deg)));
+            const double sx = from.x / turned.width();
+            const double sy = from.y / turned.height();
+            const double ox = (hole.x - pixels.box.left()) / pixels.box.width();
+            const double oy = (hole.y - pixels.box.top()) / pixels.box.height();
+            QVERIFY2(std::abs(sx - ox) < 0.06, qPrintable(QString("%1 vs %2 at %3").arg(sx).arg(ox).arg(deg)));
+            QVERIFY2(std::abs(sy - oy) < 0.06, qPrintable(QString("%1 vs %2 at %3").arg(sy).arg(oy).arg(deg)));
+
+            const double srcAspect = double(turned.width()) / turned.height();
+            const double outAspect = double(pixels.box.width()) / pixels.box.height();
+            QVERIFY2(std::abs(srcAspect - outAspect) / srcAspect < 0.04,
+                     qPrintable(QString("%1 vs %2").arg(srcAspect).arg(outAspect)));
+        }
+    }
+
+    LabelRenderer::Request extra;
+    extra.fit = LabelRenderer::Fit::Page;
+    extra.extraQuarters = 1;
+    const LabelRenderer::Result stepped = LabelRenderer::renderFile(path, extra);
+    QVERIFY(stepped.ok());
+    QCOMPARE(stepped.turnDegrees, 180);
+
+    extra.extraQuarters = 4;
+    const LabelRenderer::Result wrapped = LabelRenderer::renderFile(path, extra);
+    QVERIFY(wrapped.ok());
+    QCOMPARE(wrapped.turnDegrees, 90);
+}
+
+void LabelMakerTests::portraitLabelAtZeroStaysPut()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QImage source(808, 1218, QImage::Format_RGB32);
+    source.fill(Qt::white);
+    for (int y = 0; y < source.height(); ++y) {
+        for (int x = 0; x < source.width(); ++x) {
+            if (x < 24 || y < 24 || x >= source.width() - 24 || y >= source.height() - 24)
+                source.setPixel(x, y, qRgb(0, 0, 0));
+        }
+    }
+    for (int y = 40; y < 110; ++y) {
+        for (int x = 40; x < 180; ++x)
+            source.setPixel(x, y, qRgb(0, 0, 0));
+    }
+    const QString path = dir.filePath(QStringLiteral("label.png"));
+    QVERIFY(source.save(path));
+    const QImage upside = source.transformed(QTransform().rotate(180), Qt::FastTransformation);
+
+    const LabelRenderer::Fit fits[] = {LabelRenderer::Fit::Shipping, LabelRenderer::Fit::Page,
+                                       LabelRenderer::Fit::Fill};
+    for (LabelRenderer::Fit fit : fits) {
+        LabelRenderer::Request request;
+        request.fit = fit;
+        request.absoluteDegrees = 0;
+        const LabelRenderer::Result same = LabelRenderer::renderFile(path, request);
+        QVERIFY2(same.ok(), qPrintable(same.error));
+        QCOMPARE(same.turnDegrees, 0);
+        QVERIFY2(!same.rotated, qPrintable(QString::number(int(fit))));
+        QVERIFY2(samePixels(same.image, source), qPrintable(QString::number(int(fit))));
+
+        request.absoluteDegrees = 180;
+        const LabelRenderer::Result flipped = LabelRenderer::renderFile(path, request);
+        QVERIFY2(flipped.ok(), qPrintable(flipped.error));
+        QCOMPARE(flipped.turnDegrees, 180);
+        QVERIFY(!flipped.rotated);
+        QCOMPARE(flipped.image.size(), source.size());
+        QVERIFY2(samePixels(flipped.image, upside), qPrintable(QString::number(int(fit))));
+    }
+}
+
+void LabelMakerTests::rotateFourTimesReturnsToAuto()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QImage wide(960, 240, QImage::Format_RGB32);
+    wide.fill(Qt::black);
+    const QString widePath = dir.filePath(QStringLiteral("wide.png"));
+    QVERIFY(wide.save(widePath));
+
+    Backend backend(nullptr);
+    backend.openPath(widePath);
+    QTRY_VERIFY_WITH_TIMEOUT(backend.hasLabel(), 5000);
+    QCOMPARE(backend.turn(), 0);
+    const QImage start = backend.preview();
+
+    for (int i = 0; i < 4; ++i) {
+        const int revision = backend.revision();
+        backend.rotate();
+        QTRY_VERIFY_WITH_TIMEOUT(backend.revision() > revision, 5000);
+        QCOMPARE(backend.turn(), (i + 1) % 4);
+        if (i == 0)
+            QVERIFY(backend.preview() != start);
+    }
+    QCOMPARE(backend.turn(), 0);
+    QVERIFY(samePixels(backend.preview(), start));
+
+    const int revision = backend.revision();
+    backend.rotate();
+    QTRY_VERIFY_WITH_TIMEOUT(backend.revision() > revision, 5000);
+    QCOMPARE(backend.turn(), 1);
+    backend.undo();
+    QCOMPARE(backend.turn(), 0);
+
+    const QString pdf = dir.filePath(QStringLiteral("two.pdf"));
+    writeLetter(pdf, QRectF(36, 72, 288, 432), true);
+    backend.openPath(pdf);
+    QCOMPARE(backend.turn(), 0);
+    backend.rotate();
+    QCOMPARE(backend.turn(), 1);
+    backend.setPage(2);
+    QCOMPARE(backend.turn(), 0);
 }
 
 void LabelMakerTests::photoModeDithers()

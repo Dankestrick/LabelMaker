@@ -70,6 +70,9 @@ public:
     void setPhoto(bool photo);
     void setFit(int fit);
     void setTurn(int turn);
+
+    Q_INVOKABLE void rotate();
+    Q_INVOKABLE void resetTurn();
     void setSizeIndex(int index);
     void setCustomWidthMm(double mm);
     void setCustomHeightMm(double mm);

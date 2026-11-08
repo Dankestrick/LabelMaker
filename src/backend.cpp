@@ -55,7 +55,9 @@ LabelRenderer::Request Backend::request() const
     request.heightMm = m_heightMm;
     request.pageIndex = m_page - 1;
     request.fit = static_cast<LabelRenderer::Fit>(qBound(0, m_fit, 2));
-    request.turn = static_cast<LabelRenderer::Turn>(qBound(0, m_turn, 2));
+    // 0 is Auto. Each step is one more clockwise quarter on top of that.
+    request.turn = LabelRenderer::Turn::Auto;
+    request.extraQuarters = qBound(0, m_turn, 3);
     request.photo = m_photo;
     return request;
 }
@@ -204,6 +206,7 @@ void Backend::setPage(int page)
         return;
     pushUndo();
     m_page = page;
+    m_turn = 0;
     scheduleRender();
 }
 
@@ -249,12 +252,22 @@ void Backend::setFit(int fit)
 
 void Backend::setTurn(int turn)
 {
-    turn = qBound(0, turn, 2);
+    turn = qBound(0, turn, 3);
     if (turn == m_turn)
         return;
     pushUndo();
     m_turn = turn;
     scheduleRender();
+}
+
+void Backend::rotate()
+{
+    setTurn((m_turn + 1) % 4);
+}
+
+void Backend::resetTurn()
+{
+    setTurn(0);
 }
 
 void Backend::setSizeIndex(int index)
