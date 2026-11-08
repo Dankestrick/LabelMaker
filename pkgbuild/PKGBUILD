@@ -1,6 +1,6 @@
 pkgname=label-maker
 pkgver=0.1.0
-pkgrel=2
+pkgrel=3
 pkgdesc='Print labels and stickers on the D450'
 arch=('x86_64' 'aarch64')
 license=('MIT')
