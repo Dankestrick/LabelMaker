@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Label Maker
+Name[da]=Label Maker
+Comment=Print labels and stickers on the D450
+Comment[da]=Udskriv etiketter og klistermærker på D450
+Exec=label-maker %f
+Icon=label-maker
+Terminal=false
+Categories=Utility;
+StartupWMClass=label-maker
+MimeType=application/pdf;image/png;image/jpeg;image/webp;image/bmp;
