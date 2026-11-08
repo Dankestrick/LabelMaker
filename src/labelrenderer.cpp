@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -61,6 +62,274 @@ QRect contentBounds(const QImage &image, int whiteLevel)
     if (maxX < 0)
         return {};
     return QRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+// A 4x6 label, or the same label turned sideways, within 20%.
+bool nearLabelShape(double widthIn, double heightIn)
+{
+    auto within = [](double value, double target) {
+        return value >= target * 0.8 && value <= target * 1.2;
+    };
+    return (within(widthIn, 4.0) && within(heightIn, 6.0))
+           || (within(widthIn, 6.0) && within(heightIn, 4.0));
+}
+
+struct InkMask {
+    int width = 0;
+    int height = 0;
+    std::vector<uchar> on;
+};
+
+InkMask inkMaskFrom(const QImage &image, int whiteLevel)
+{
+    const QImage gray = image.format() == QImage::Format_Grayscale8
+                            ? image
+                            : image.convertToFormat(QImage::Format_Grayscale8);
+    InkMask mask;
+    mask.width = gray.width();
+    mask.height = gray.height();
+    mask.on.assign(static_cast<size_t>(mask.width * mask.height), 0);
+    for (int y = 0; y < mask.height; ++y) {
+        const uchar *row = gray.constScanLine(y);
+        for (int x = 0; x < mask.width; ++x)
+            mask.on[static_cast<size_t>(y * mask.width + x)] = row[x] < whiteLevel ? 1 : 0;
+    }
+    return mask;
+}
+
+// Dotted cut lines are just specks once each dot is its own blob.
+void removeSpecks(InkMask *mask, int speckPx)
+{
+    const int width = mask->width;
+    const int height = mask->height;
+    std::vector<uchar> seen(mask->on.size(), 0);
+    std::vector<int> stack;
+    std::vector<int> blob;
+    const int step[4] = {1, -1, width, -width};
+    for (int start = 0; start < width * height; ++start) {
+        if (!mask->on[static_cast<size_t>(start)] || seen[static_cast<size_t>(start)])
+            continue;
+        stack.clear();
+        blob.clear();
+        stack.push_back(start);
+        seen[static_cast<size_t>(start)] = 1;
+        int minX = width;
+        int minY = height;
+        int maxX = 0;
+        int maxY = 0;
+        while (!stack.empty()) {
+            const int index = stack.back();
+            stack.pop_back();
+            blob.push_back(index);
+            const int x = index % width;
+            const int y = index / width;
+            minX = std::min(minX, x);
+            minY = std::min(minY, y);
+            maxX = std::max(maxX, x);
+            maxY = std::max(maxY, y);
+            for (int delta : step) {
+                const int next = index + delta;
+                if (next < 0 || next >= width * height || seen[static_cast<size_t>(next)]
+                    || !mask->on[static_cast<size_t>(next)])
+                    continue;
+                const int nx = next % width;
+                const int ny = next / width;
+                if (std::abs(nx - x) + std::abs(ny - y) != 1)
+                    continue;
+                seen[static_cast<size_t>(next)] = 1;
+                stack.push_back(next);
+            }
+        }
+        if (maxX - minX + 1 < speckPx && maxY - minY + 1 < speckPx) {
+            for (int index : blob)
+                mask->on[static_cast<size_t>(index)] = 0;
+        }
+    }
+}
+
+QRect trimToInk(const InkMask &mask, QRect rect)
+{
+    rect = rect.intersected(QRect(0, 0, mask.width, mask.height));
+    if (rect.isEmpty())
+        return {};
+    int minX = rect.right();
+    int minY = rect.bottom();
+    int maxX = rect.left();
+    int maxY = rect.top();
+    bool any = false;
+    for (int y = rect.top(); y <= rect.bottom(); ++y) {
+        const uchar *row = mask.on.data() + static_cast<size_t>(y * mask.width);
+        for (int x = rect.left(); x <= rect.right(); ++x) {
+            if (!row[x])
+                continue;
+            any = true;
+            minX = std::min(minX, x);
+            minY = std::min(minY, y);
+            maxX = std::max(maxX, x);
+            maxY = std::max(maxY, y);
+        }
+    }
+    if (!any)
+        return {};
+    return QRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+int countInk(const InkMask &mask, const QRect &rect)
+{
+    int count = 0;
+    for (int y = rect.top(); y <= rect.bottom(); ++y) {
+        const uchar *row = mask.on.data() + static_cast<size_t>(y * mask.width);
+        for (int x = rect.left(); x <= rect.right(); ++x)
+            count += row[x];
+    }
+    return count;
+}
+
+// White rows, plus a ruled line thin enough to be a cut mark rather than text.
+std::vector<char> separatorRuns(const InkMask &mask, const QRect &rect, bool horizontal, int thinPx)
+{
+    const int span = horizontal ? rect.height() : rect.width();
+    std::vector<char> white(static_cast<size_t>(span), 0);
+    for (int i = 0; i < span; ++i) {
+        bool ink = false;
+        if (horizontal) {
+            const int y = rect.top() + i;
+            const uchar *row = mask.on.data() + static_cast<size_t>(y * mask.width);
+            for (int x = rect.left(); x <= rect.right(); ++x) {
+                if (row[x]) {
+                    ink = true;
+                    break;
+                }
+            }
+        } else {
+            const int x = rect.left() + i;
+            for (int y = rect.top(); y <= rect.bottom(); ++y) {
+                if (mask.on[static_cast<size_t>(y * mask.width + x)]) {
+                    ink = true;
+                    break;
+                }
+            }
+        }
+        white[static_cast<size_t>(i)] = ink ? 0 : 1;
+    }
+    for (int i = 0; i < span;) {
+        if (white[static_cast<size_t>(i)]) {
+            ++i;
+            continue;
+        }
+        int end = i;
+        while (end < span && !white[static_cast<size_t>(end)])
+            ++end;
+        const bool sandwiched = (i == 0 || white[static_cast<size_t>(i - 1)])
+                                && (end == span || white[static_cast<size_t>(end)]);
+        if (sandwiched && end - i <= thinPx) {
+            for (int k = i; k < end; ++k)
+                white[static_cast<size_t>(k)] = 1;
+        }
+        i = end;
+    }
+    return white;
+}
+
+std::vector<QRect> splitOnGaps(const InkMask &mask, const QRect &rect, bool horizontal, int gapPx, int thinPx)
+{
+    const std::vector<char> white = separatorRuns(mask, rect, horizontal, thinPx);
+    const int span = static_cast<int>(white.size());
+    std::vector<QRect> parts;
+    int cursor = 0;
+    bool split = false;
+    for (int i = 0; i < span;) {
+        if (!white[static_cast<size_t>(i)]) {
+            ++i;
+            continue;
+        }
+        int end = i;
+        while (end < span && white[static_cast<size_t>(end)])
+            ++end;
+        if (end - i >= gapPx) {
+            split = true;
+            if (i > cursor) {
+                parts.push_back(horizontal ? QRect(rect.left(), rect.top() + cursor, rect.width(), i - cursor)
+                                           : QRect(rect.left() + cursor, rect.top(), i - cursor, rect.height()));
+            }
+            cursor = end;
+        }
+        i = end;
+    }
+    if (!split)
+        return {rect};
+    if (cursor < span) {
+        parts.push_back(horizontal ? QRect(rect.left(), rect.top() + cursor, rect.width(), span - cursor)
+                                   : QRect(rect.left() + cursor, rect.top(), span - cursor, rect.height()));
+    }
+    return parts;
+}
+
+struct InkBlock {
+    QRect bounds;
+    int ink = 0;
+};
+
+void collectBlocks(const InkMask &mask, QRect rect, int gapPx, int thinPx, std::vector<InkBlock> *blocks)
+{
+    rect = trimToInk(mask, rect);
+    if (rect.isEmpty())
+        return;
+
+    const auto descend = [&](const std::vector<QRect> &parts) {
+        const bool sliced = parts.size() >= 2
+                            || (parts.size() == 1
+                                && (parts[0].width() < rect.width() || parts[0].height() < rect.height()));
+        if (!sliced)
+            return false;
+        for (const QRect &part : parts)
+            collectBlocks(mask, part, gapPx, thinPx, blocks);
+        return true;
+    };
+    if (descend(splitOnGaps(mask, rect, true, gapPx, thinPx)))
+        return;
+    if (descend(splitOnGaps(mask, rect, false, gapPx, thinPx)))
+        return;
+
+    InkBlock block;
+    block.bounds = rect;
+    block.ink = countInk(mask, rect);
+    if (block.ink > 0)
+        blocks->push_back(block);
+}
+
+// The label is the 4x6-shaped block with the most ink. Anything else falls
+// back to the biggest block. A block that already covers the page stays whole.
+QRect shippingBlock(const QImage &detected, double dpi)
+{
+    if (detected.isNull() || dpi <= 0.0)
+        return {};
+    InkMask mask = inkMaskFrom(detected, 250);
+    const int speckPx = std::max(2, int(std::lround(2.0 / 25.4 * dpi)));
+    const int gapPx = std::max(4, int(std::lround(0.25 * dpi)));
+    const int thinPx = std::max(1, int(std::lround(1.0 / 25.4 * dpi)));
+    removeSpecks(&mask, speckPx);
+
+    std::vector<InkBlock> blocks;
+    collectBlocks(mask, QRect(0, 0, mask.width, mask.height), gapPx, thinPx, &blocks);
+    if (blocks.empty())
+        return {};
+
+    const InkBlock *shaped = nullptr;
+    const InkBlock *largest = nullptr;
+    for (const InkBlock &block : blocks) {
+        if (!largest || block.bounds.width() * block.bounds.height()
+                          > largest->bounds.width() * largest->bounds.height())
+            largest = &block;
+        if (!nearLabelShape(block.bounds.width() / dpi, block.bounds.height() / dpi))
+            continue;
+        if (!shaped || block.ink > shaped->ink)
+            shaped = &block;
+    }
+    const InkBlock *chosen = shaped ? shaped : largest;
+    if (chosen->bounds.width() >= mask.width * 0.9 && chosen->bounds.height() >= mask.height * 0.9)
+        return QRect(0, 0, mask.width, mask.height);
+    return chosen->bounds;
 }
 
 // Rotate only when the label can hold the artwork clearly better that way.
@@ -211,12 +480,15 @@ LabelRenderer::Result renderPdf(const QString &path, const LabelRenderer::Reques
 
     const QSizeF pagePt = page->pageSizeF();
     QRectF sourcePt(0, 0, pagePt.width(), pagePt.height());
-    if (request.fit == LabelRenderer::Fit::Shipping) {
+    if (request.fit == LabelRenderer::Fit::Shipping
+        && !nearLabelShape(pagePt.width() / 72.0, pagePt.height() / 72.0)) {
+        // A letter page keeps the label and drops the instructions beside it.
+        // A page that is already 4x6 is left whole, above.
         constexpr double detectDpi = 72.0;
         const QImage detected = page->renderToImage(detectDpi, detectDpi);
         if (detected.isNull())
             return fail(tr("Couldn't draw that page."), pageCount);
-        const QRect bounds = contentBounds(detected, 250);
+        const QRect bounds = shippingBlock(detected, detectDpi);
         if (bounds.isEmpty())
             return fail(tr("This page looks blank."), pageCount);
         const double ptPerPx = 72.0 / detectDpi;

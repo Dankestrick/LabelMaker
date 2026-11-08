@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 #include <QDir>
 #include <QFile>
@@ -67,6 +68,10 @@ private slots:
     void sizeRoundsWidthDownToBytes();
     void shippingFindsHalfPage_data();
     void shippingFindsHalfPage();
+    void shippingIgnoresTextBesideTheLabel();
+    void shippingIgnoresADottedCutLine();
+    void shippingTurnsALandscapeLabel();
+    void shippingKeepsANativeLabel();
     void blankPageIsAnError();
     void secondPageCanBeBlank();
     void thresholdIsOnlyBlackOrWhite();
@@ -105,6 +110,19 @@ private:
             painter.drawRect(black);
         if (secondBlank)
             writer.newPage();
+        painter.end();
+    }
+
+    static void paintPdf(const QString &path, const QPageSize &pageSize,
+                         const std::function<void(QPainter &)> &draw)
+    {
+        QPdfWriter writer(path);
+        writer.setPageLayout(QPageLayout(pageSize, QPageLayout::Portrait, QMarginsF(0, 0, 0, 0)));
+        writer.setResolution(72);
+        QPainter painter(&writer);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(Qt::black);
+        draw(painter);
         painter.end();
     }
 };
@@ -162,6 +180,88 @@ void LabelMakerTests::shippingFindsHalfPage()
     const Coverage pixels = cover(result.image);
     QCOMPARE(pixels.other, 0);
     QVERIFY2(double(pixels.black) / pixels.total > 0.75, qPrintable(QString::number(pixels.black)));
+}
+
+void LabelMakerTests::shippingIgnoresTextBesideTheLabel()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("beside.pdf");
+    // 4x6 block on the left, a few instruction lines on the right, half an inch away.
+    paintPdf(path, QPageSize(QPageSize::Letter), [](QPainter &painter) {
+        painter.drawRect(QRectF(36, 72, 288, 432));
+        painter.drawRect(QRectF(360, 180, 160, 8));
+        painter.drawRect(QRectF(360, 196, 140, 8));
+        painter.drawRect(QRectF(360, 212, 120, 8));
+    });
+
+    const LabelRenderer::Result result = LabelRenderer::renderFile(path, {});
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.rotated, false);
+    const Coverage pixels = cover(result.image);
+    QCOMPARE(pixels.other, 0);
+    QVERIFY2(double(pixels.black) / pixels.total > 0.75, qPrintable(QString::number(pixels.black)));
+}
+
+void LabelMakerTests::shippingIgnoresADottedCutLine()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("dotted.pdf");
+    paintPdf(path, QPageSize(QPageSize::Letter), [](QPainter &painter) {
+        painter.drawRect(QRectF(36, 36, 288, 432));
+        for (int x = 36; x < 560; x += 8)
+            painter.drawRect(QRectF(x, 500, 2, 2));
+        painter.drawRect(QRectF(36, 540, 200, 8));
+        painter.drawRect(QRectF(36, 556, 180, 8));
+        painter.drawRect(QRectF(36, 572, 160, 8));
+    });
+
+    const LabelRenderer::Result result = LabelRenderer::renderFile(path, {});
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.rotated, false);
+    const Coverage pixels = cover(result.image);
+    QCOMPARE(pixels.other, 0);
+    QVERIFY2(double(pixels.black) / pixels.total > 0.75, qPrintable(QString::number(pixels.black)));
+}
+
+void LabelMakerTests::shippingTurnsALandscapeLabel()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("landscape.pdf");
+    paintPdf(path, QPageSize(QPageSize::Letter), [](QPainter &painter) {
+        painter.drawRect(QRectF(36, 72, 432, 288));
+        painter.drawRect(QRectF(504, 120, 70, 8));
+        painter.drawRect(QRectF(504, 136, 60, 8));
+    });
+
+    const LabelRenderer::Result result = LabelRenderer::renderFile(path, {});
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.rotated, true);
+    const Coverage pixels = cover(result.image);
+    QCOMPARE(pixels.other, 0);
+    QVERIFY2(double(pixels.black) / pixels.total > 0.75, qPrintable(QString::number(pixels.black)));
+}
+
+void LabelMakerTests::shippingKeepsANativeLabel()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("native.pdf");
+    const QPageSize page(QSizeF(4, 6), QPageSize::Inch, QString(), QPageSize::ExactMatch);
+    paintPdf(path, page, [](QPainter &painter) {
+        painter.drawRect(QRectF(108, 180, 72, 72));
+    });
+
+    const LabelRenderer::Result result = LabelRenderer::renderFile(path, {});
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.rotated, false);
+    const Coverage pixels = cover(result.image);
+    QCOMPARE(pixels.other, 0);
+    QVERIFY2(double(pixels.black) / pixels.total < 0.2, qPrintable(QString::number(pixels.black)));
+    QVERIFY(pixels.box.width() < result.image.width() / 2);
+    QVERIFY(std::abs(pixels.box.width() - pixels.box.height()) < pixels.box.width() / 5);
 }
 
 void LabelMakerTests::blankPageIsAnError()
