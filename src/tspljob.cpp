@@ -54,13 +54,20 @@ QByteArray TsplJob::bitmapBytes(const QImage &image, bool blackIsZero)
 
 QByteArray TsplJob::encode(const QImage &image, const TsplOptions &options)
 {
+    const QByteArray body = encodeBody(image, options);
+    if (body.isEmpty())
+        return {};
+    return body + "\r\nPRINT " + QByteArray::number(qMax(1, options.copies)) + "\r\n";
+}
+
+QByteArray TsplJob::encodeBody(const QImage &image, const TsplOptions &options)
+{
     const QByteArray pixels = bitmapBytes(image, options.blackIsZero);
     if (pixels.isEmpty())
         return {};
 
     const int bytesPerRow = (image.width() + 7) / 8;
     const int density = qBound(1, options.density, 15);
-    const int copies = qMax(1, options.copies);
     const QByteArray header =
         "\r\nSIZE " + formatMm(options.widthMm).toLatin1() + " mm,"
         + formatMm(options.heightMm).toLatin1() + " mm\r\n"
@@ -70,5 +77,5 @@ QByteArray TsplJob::encode(const QImage &image, const TsplOptions &options)
         "CLS\r\n"
         "BITMAP 0,0," + QByteArray::number(bytesPerRow) + ","
         + QByteArray::number(image.height()) + ",0,";
-    return header + pixels + "\r\nPRINT " + QByteArray::number(copies) + "\r\n";
+    return header + pixels;
 }

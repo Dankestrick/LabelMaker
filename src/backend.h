@@ -6,6 +6,7 @@
 #include <QVector>
 
 #include "labelrenderer.h"
+#include "printerlink.h"
 
 class FilePicker;
 
@@ -29,6 +30,8 @@ class Backend : public QObject {
     Q_PROPERTY(int labelHeight READ labelHeight NOTIFY changed)
     Q_PROPERTY(int revision READ revision NOTIFY changed)
     Q_PROPERTY(bool canPrint READ canPrint NOTIFY changed)
+    Q_PROPERTY(bool printing READ printing NOTIFY changed)
+    Q_PROPERTY(double printProgress READ printProgress NOTIFY changed)
 
 public:
     explicit Backend(FilePicker *picker, QObject *parent = nullptr);
@@ -49,7 +52,9 @@ public:
     int labelWidth() const { return m_labelWidth; }
     int labelHeight() const { return m_labelHeight; }
     int revision() const { return m_revision; }
-    bool canPrint() const { return false; }
+    bool canPrint() const { return hasLabel() && !m_link.busy(); }
+    bool printing() const { return m_link.busy(); }
+    double printProgress() const { return m_printProgress; }
 
     QImage preview() const { return m_preview; }
     QString path() const { return m_path; }
@@ -126,4 +131,6 @@ private:
     QVector<Snapshot> m_undo;
     QVector<Snapshot> m_redo;
     QTimer m_renderTimer;
+    PrinterLink m_link;
+    double m_printProgress = 0;
 };

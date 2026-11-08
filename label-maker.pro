@@ -15,6 +15,7 @@ HEADERS += \
     src/labelrenderer.h \
     src/labelsize.h \
     src/portalfilepicker.h \
+    src/printerlink.h \
     src/theme.h \
     src/translator.h \
     src/tspljob.h
@@ -25,6 +26,7 @@ SOURCES += \
     src/cli.cpp \
     src/labelrenderer.cpp \
     src/portalfilepicker.cpp \
+    src/printerlink.cpp \
     src/theme.cpp \
     src/translator.cpp \
     src/tspljob.cpp

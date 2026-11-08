@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 testlib
+QT += core gui qml quick quickcontrols2 testlib dbus
 CONFIG += c++17 testcase
 TARGET = labelmaker_tests
 TEMPLATE = app
@@ -16,7 +16,8 @@ HEADERS += \
     ../src/labelsize.h \
     ../src/theme.h \
     ../src/translator.h \
-    ../src/tspljob.h
+    ../src/tspljob.h \
+    ../src/printerlink.h
 
 SOURCES += \
     labelmaker_tests.cpp \
@@ -24,6 +25,7 @@ SOURCES += \
     ../src/labelrenderer.cpp \
     ../src/theme.cpp \
     ../src/translator.cpp \
-    ../src/tspljob.cpp
+    ../src/tspljob.cpp \
+    ../src/printerlink.cpp
 
 RESOURCES += ../src/resources.qrc

@@ -1,5 +1,7 @@
 #include "backend.h"
 
+#include "tspljob.h"
+
 #include "filepicker.h"
 #include "labelsize.h"
 
@@ -7,6 +9,22 @@
 
 Backend::Backend(FilePicker *picker, QObject *parent) : QObject(parent), m_picker(picker)
 {
+    connect(&m_link, &PrinterLink::progress, this, [this](const QString &message, double fraction) {
+        m_status = message;
+        m_printProgress = fraction;
+        emit changed();
+    });
+    connect(&m_link, &PrinterLink::finished, this, [this](bool ok, const QString &message) {
+        if (ok) {
+            m_status = message;
+            m_error.clear();
+        } else {
+            m_status.clear();
+            m_error = message;
+        }
+        m_printProgress = ok ? 1 : 0;
+        emit changed();
+    });
     if (m_picker) {
         connect(m_picker, &FilePicker::openSelected, this, [this](const QUrl &url) {
             const QString path = url.toLocalFile();
@@ -139,8 +157,22 @@ void Backend::print()
         openFile();
         return;
     }
-    m_status = tr("Printing isn't connected yet.");
+    if (m_link.busy())
+        return;
+    TsplOptions options;
+    options.widthMm = m_widthMm;
+    options.heightMm = m_heightMm;
+    options.density = m_darkness;
+    options.copies = m_copies;
+    const QByteArray body = TsplJob::encodeBody(m_preview, options);
+    if (body.isEmpty()) {
+        m_error = tr("Couldn't build the label.");
+        emit changed();
+        return;
+    }
     m_error.clear();
+    m_printProgress = 0;
+    m_link.print(body, m_copies);
     emit changed();
 }
 

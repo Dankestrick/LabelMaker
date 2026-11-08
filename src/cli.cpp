@@ -3,6 +3,9 @@
 #include "labelrenderer.h"
 #include "labelsize.h"
 #include "tspljob.h"
+#include "printerlink.h"
+
+#include <QEventLoop>
 
 #include <QCoreApplication>
 #include <QFile>
@@ -17,7 +20,7 @@ void printHelp(QTextStream &out)
 {
     out << "label-maker open [file]\n"
            "label-maker --render <file> --size 4x6 [--page N] [--fit shipping|page|fill]\n"
-           "            [--photo] [--darkness N] [--copies N] --out preview.png [--tspl job.bin] [--json]\n";
+           "            [--photo] [--darkness N] [--copies N] --out preview.png [--tspl job.bin] [--print] [--json]\n";
 }
 
 bool writeAtomic(const QString &path, const QByteArray &bytes, QString *error)
@@ -147,14 +150,17 @@ int runCli()
             photo = true;
         } else if (arg == QLatin1String("--json")) {
             json = true;
+        } else if (arg == QLatin1String("--print")) {
+            // read below
         } else {
             fail(QCoreApplication::translate("Cli", "Unknown option %1.").arg(arg), json);
             return 1;
         }
     }
 
-    if (input.isEmpty() || (outPath.isEmpty() && tsplPath.isEmpty())) {
-        fail(QCoreApplication::translate("Cli", "Pass --render and at least one of --out or --tspl."), json);
+    const bool sendToPrinter = args.contains(QStringLiteral("--print"));
+    if (input.isEmpty() || (outPath.isEmpty() && tsplPath.isEmpty() && !sendToPrinter)) {
+        fail(QCoreApplication::translate("Cli", "Pass --render and at least one of --out, --tspl or --print."), json);
         return 1;
     }
 
@@ -206,6 +212,29 @@ int runCli()
             fail(error.isEmpty() ? QCoreApplication::translate("Cli", "Couldn't build the print job.") : error, json);
             return 1;
         }
+    }
+
+    if (sendToPrinter) {
+        TsplOptions options;
+        options.widthMm = widthMm;
+        options.heightMm = heightMm;
+        options.density = darkness;
+        options.copies = copies;
+        PrinterLink link;
+        QEventLoop loop;
+        bool printed = false;
+        QObject::connect(&link, &PrinterLink::progress, [](const QString &message, double fraction) {
+            QTextStream(stderr) << message << " " << int(fraction * 100) << "%\n";
+        });
+        QObject::connect(&link, &PrinterLink::finished, [&](bool ok, const QString &message) {
+            printed = ok;
+            QTextStream(stderr) << message << "\n";
+            loop.quit();
+        });
+        link.print(TsplJob::encodeBody(result.image, options), copies);
+        loop.exec();
+        if (!printed)
+            return 1;
     }
 
     if (json) {

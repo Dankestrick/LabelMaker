@@ -68,11 +68,19 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
+
+                    ProgressBar {
+                        visible: backend.printing
+                        value: backend.printProgress
+                        Layout.fillWidth: true
+                        Behavior on value { NumberAnimation { duration: 300 } }
+                    }
                 }
 
                 Button {
-                    text: qsTr("Print")
-                    enabled: false
+                    text: backend.printing ? qsTr("Printing...") : qsTr("Print")
+                    enabled: backend.canPrint
+                    onClicked: backend.print()
                     Material.roundedScale: theme.radius
                 }
             }
