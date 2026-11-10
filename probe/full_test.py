@@ -2,7 +2,7 @@
 import asyncio, sys, time
 from PIL import Image, ImageDraw, ImageFont
 from bleak import BleakClient
-ADDR="00:00:00:00:00:00"; TX="49535343-8841-43f4-a8d4-ecbe34729bb3"; RX="49535343-1e4d-4bd9-ba61-23c647249616"
+ADDR = __import__("os").environ["D450_ADDR"]; TX="49535343-8841-43f4-a8d4-ecbe34729bb3"; RX="49535343-1e4d-4bd9-ba61-23c647249616"
 W, H = 808, 1218
 img = Image.new("1", (W, H), 1)
 d = ImageDraw.Draw(img)

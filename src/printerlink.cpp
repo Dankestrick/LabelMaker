@@ -19,9 +19,8 @@ const QString DeviceIface = QStringLiteral("org.bluez.Device1");
 const QString CharIface = QStringLiteral("org.bluez.GattCharacteristic1");
 const QString PropsIface = QStringLiteral("org.freedesktop.DBus.Properties");
 
-// The D450 by name; or by address.
+// The printer advertises itself as "D450"; it needs no pairing.
 const QString PrinterName = QStringLiteral("D450");
-const QString PrinterAddress = QStringLiteral("00:00:00:00:00:00");
 const QString TxUuid = QStringLiteral("49535343-8841-43f4-a8d4-ecbe34729bb3");
 const QString RxUuid = QStringLiteral("49535343-1e4d-4bd9-ba61-23c647249616");
 
@@ -87,8 +86,7 @@ bool PrinterLink::scanObjects()
         const QVariantMap device = it.value().value(DeviceIface);
         if (device.isEmpty())
             continue;
-        if (device.value(QStringLiteral("Address")).toString() == PrinterAddress
-            || device.value(QStringLiteral("Name")).toString() == PrinterName) {
+        if (device.value(QStringLiteral("Name")).toString() == PrinterName) {
             m_device = it.key().path();
             break;
         }

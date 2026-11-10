@@ -2,7 +2,7 @@
 import asyncio, sys, time
 from PIL import Image
 from bleak import BleakClient
-ADDR="00:00:00:00:00:00"; TX="49535343-8841-43f4-a8d4-ecbe34729bb3"; RX="49535343-1e4d-4bd9-ba61-23c647249616"
+ADDR = __import__("os").environ["D450_ADDR"]; TX="49535343-8841-43f4-a8d4-ecbe34729bb3"; RX="49535343-1e4d-4bd9-ba61-23c647249616"
 img = Image.open(sys.argv[1]).convert("1"); W, H = img.size; assert W % 8 == 0
 body = (b"\r\nSIZE 100 mm,150 mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 1\r\nDENSITY 10\r\nCLS\r\n"
         + f"BITMAP 0,0,{W//8},{H},0,".encode() + img.tobytes() + b"\r\n")

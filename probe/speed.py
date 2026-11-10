@@ -1,7 +1,7 @@
 """Send a full 4x6 bitmap without PRINT to time the link, then clear it."""
 import asyncio, sys, time
 from bleak import BleakClient
-ADDR="00:00:00:00:00:00"; TX="49535343-8841-43f4-a8d4-ecbe34729bb3"; RX="49535343-1e4d-4bd9-ba61-23c647249616"
+ADDR = __import__("os").environ["D450_ADDR"]; TX="49535343-8841-43f4-a8d4-ecbe34729bb3"; RX="49535343-1e4d-4bd9-ba61-23c647249616"
 ROW, H = 812 // 8, 1218
 job = (b"\r\nSIZE 100 mm,150 mm\r\nCLS\r\n" + f"BITMAP 0,0,{ROW},{H},0,".encode()
        + b"\xff" * (ROW * H) + b"\r\nCLS\r\n")
